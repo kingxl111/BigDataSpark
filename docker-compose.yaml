@@ -32,3 +32,40 @@ services:
       - ./jars/postgresql-42.7.3.jar:/app/postgresql-jdbc.jar
     command: ["/bin/bash", "-c", "until nc -z postgres 5432; do echo 'Waiting for PostgreSQL...'; sleep 1; done; sleep 5; /opt/bitnami/spark/bin/spark-submit --master local[*] --jars /app/postgresql-jdbc.jar --driver-class-path /app/postgresql-jdbc.jar /app/spark_etl.py"]    
     
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.3-alpine
+    container_name: clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/custom.xml
+    environment:
+      CLICKHOUSE_DB: analytics
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: admin
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user admin --password admin --query 'SELECT 1'"]
+      interval: 30s
+      timeout: 15s
+      retries: 100
+      start_period: 40s
+
+  spark_clickhouse:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: lab1-spark-clickhouse
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    links:
+      - spark:spark
+    volumes:
+      - ./clickhouse_etl:/clickhouse_etl
+    command: ["/bin/bash", "-c", "until nc -z postgres 5432 && nc -z clickhouse 8123; do sleep 5; done; sleep 10; /opt/bitnami/spark/bin/spark-submit --master local[*] /clickhouse_etl/spark_etl_clickhouse.py"]
+  
